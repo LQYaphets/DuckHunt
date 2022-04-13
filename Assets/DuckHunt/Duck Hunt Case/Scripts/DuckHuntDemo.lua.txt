@@ -1,0 +1,666 @@
+---Duck Hunt 
+---
+GameDemo= {}
+--local module = require "GameDemoModule"
+--local spGame = require "simpleGame"
+local yield_return = (require 'cs_coroutine').yield_return
+local unity
+local startTimer=false
+local textTimer
+local callCS
+local joystick
+local chooseObj
+local lionAnimator
+local mainCam
+local bottomPercent =0.3
+local level = 1
+local audioSourceBg
+local audioSourceGun
+local resourcesRef
+local bulletNum = 3
+local bOne,bTwo,bThree
+local BlueDuck,DarkDuck
+--限定逃逸事件的调用次数
+local count= 0
+--是否逃离
+local flyAway=false
+--限定鸭子的运动是否开启
+local RandomFly= false
+--游戏中的生成的对象
+local target
+local isHitDuck= false
+local _upperNum = 7
+--标记当前生成了多少只鸭子
+local DuckNumCount=0
+--飞行方向
+local vel_x,vel_y,vel_z
+--击中鸭子数量对应的控件
+local DuckHitResults={}
+local HitDuckScore 
+local textScore
+--标记是否开始下一个关卡
+local IsNextLevel
+local DuckMoveSpeed =0
+local IsFall=false
+local HitDuckNum= 0
+
+local JoyXmoveSpeed =0
+local JoyYmoveSpeed =0
+-- 注意变量作用域
+-- 开场动画资源不能使用图集，全部压缩为512制作为序列帧全部占用100+M，需要在播放结束之后手动释放内存
+-- 使用UGUI来实现动画，序列帧播放实现作为工具类
+-- 游戏核心的状态为成功和逃逸
+-- 逃逸的触发为耗尽时间 射完子弹
+
+--游戏数值 每10个小关卡为一个大关，取一个数值
+LevelNums={0.4,0.65,0.85,0.9,0.95,1.02,1.05,1.07,1.09,1.1,1.13,1.16,1.19,1.2,1.22,1.24,1.28,1.32,1.34,1.36,1.38,1.4,1.44,1.48,1.5}
+
+--Onenable function 
+function OnEnabled()  
+    unity=CS.UnityEngine 
+end
+
+--Start function 
+function Start()  
+--Get object instance  	
+    textTimer=TextTimer:GetComponent("Text")
+    callCS = Callcs:GetComponent("DuckHuntLuaCallCS")
+    joystick =MJoystick:GetComponent("SimpleTouchController")
+    mainCam= MCam:GetComponent("Camera")
+    audioSourceBg =AudioSourceBG:GetComponent("AudioSource")
+    audioSourceGun =AudioSourceGun:GetComponent("AudioSource")
+    resourcesRef= ResourcesRef:GetComponent("DuckHuntLuaResourceRef")
+    bOne = ImageBullet.transform:GetChild(0).gameObject
+    bTwo = ImageBullet.transform:GetChild(1).gameObject
+    bThree = ImageBullet.transform:GetChild(2).gameObject
+    BlueDuck= resourcesRef.GameObjectRef[0]
+    DarkDuck= resourcesRef.GameObjectRef[1]
+    textScore = TextScore:GetComponent("Text")
+    GetHitNumElement()
+    DogLaughMovie:GetComponent("DuckHuntLuaUMovie").OnAnimationPlayEnd:AddListener(function() 
+        DogLaughMovie.gameObject:SetActive(false)
+    end)
+    BtnFire:GetComponent("Button").onClick:AddListener(function() FireEvent() end) 
+    JoystickSensitive()
+    --BtnQuit:GetComponent("Button").onClick:AddListener(function() callCS:Quit() print("Quit") end)
+    --init first level num
+    DuckMoveSpeed = 0.4
+    local bornPos= RandomBornPoint()
+    InstantiateDuck(bornPos)
+    DuckNumCount=1
+    mainCam.gameObject:AddComponent(typeof(CS.ImageEffect_MoblieBloom))
+    mainCam:GetComponent("ImageEffect_MoblieBloom").enabled=false
+    mainCam:GetComponent("ImageEffect_MoblieBloom").threshold=0.335
+    mainCam:GetComponent("ImageEffect_MoblieBloom").intensity=1.01
+    moveNavigation()
+    OpeningMovie.gameObject:SetActive(true)
+    --register opening animation end event
+    OpeningMovie:GetComponent("DuckHuntLuaUMovie").OnAnimationPlayEnd:AddListener(function() 
+        startGame()
+    end)
+    WaitForPlayAudio(11,audioSourceBg,resourcesRef.AudioRef[0])
+    showLevel(level)
+    HitDuckScore =0
+    IsNextLevel=false    
+end
+
+function JoystickSensitive()    
+    if(callCS:GetRunningPlatform()==CS.Othink.ArboxCallCs.RunningPlatform.Android)  then
+        JoyXmoveSpeed=16 JoyYmoveSpeed=15
+    else
+        JoyXmoveSpeed=22 JoyYmoveSpeed=21
+    end
+end
+
+--opening is end init game
+function startGame()
+    ImageLevel.gameObject:SetActive(false)
+    UiPanel.gameObject:SetActive(true)
+    OpeningMovie.gameObject:SetActive(false)
+    DelayDestroyOpeningAnimation() 
+    TextLevel:GetComponent("Text").text =level
+    target.gameObject:SetActive(true)
+    RandomFly= true
+    startTimer =true
+    --duck fly audio
+    AudioSourceDFly.gameObject:SetActive(true)
+    WaitForChangeAnimation(0.9)
+end
+
+function DelayDestroyOpeningAnimation()
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(1))
+            --因为开头动画的序列帧图片内存占用很大，在开场动画结束之后需要删除场景中的开场对象以删除资源引用，手动释放占用的内存
+            --使用 DestroyImmediate 可以完全卸载 但是注意卸载的对象是否不再存在引用关系
+            unity.Object.DestroyImmediate(OpeningMovie.gameObject,true)
+            OpeningMovie = nil
+            unity.Resources.UnloadUnusedAssets()
+     end)
+     assert(coroutine.resume(co))
+end
+
+function DisableBloom()
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(0.2))
+        MCam:GetComponent("ImageEffect_MoblieBloom").enabled =false
+     end)
+     assert(coroutine.resume(co))
+end
+
+local hitDuckCategory
+--Fire event
+function FireEvent() 
+    MCam:GetComponent("ImageEffect_MoblieBloom").enabled =true 
+    DisableBloom()    
+    if(chooseObj) then
+        isHitDuck =true
+        HitDuckNum =HitDuckNum+1
+        --change to static hit state
+        target:GetComponent("Animator"):SetTrigger("toEmpty") 
+        HitNumManager()
+        --time count is end 
+        startTimer =false
+        BtnFire:GetComponent("Image").raycastTarget =false         
+        --register the fall down collision event 
+        target:GetComponent("DuckHuntLuaCollision"):EventEnter('+', CheckDuckFailDownEvent)
+        hitDuckName = target.name
+        DuckScoreManager(hitDuckName)
+        BottomCollider.gameObject:SetActive(true) 
+        RandomFly =false        
+        DelayChangeFallAni()      
+        PlayAudio(audioSourceGun,resourcesRef.AudioRef[2])
+        AudioSourceDFly.gameObject:SetActive(false)   
+    else  
+        PlayAudio(audioSourceGun,resourcesRef.AudioRef[1])
+        isHitDuck =false
+    end
+    bulletNum=bulletNum-1
+    bulletNumManager(bulletNum)
+end
+
+function DelayChangeFallAni()
+    local co = coroutine.create(function()   
+                yield_return(unity.WaitForSeconds(0.5))
+                --after static static,play duck die animation
+                target:GetComponent("Animator"):SetTrigger("duckDie")
+                ScoreFlag()
+                IsFall=true                
+            end)
+    assert(coroutine.resume(co))
+end
+
+function ScoreFlag()
+    if(hitDuckCategory=="dark")  then
+        sc500.transform.localPosition =target.transform.localPosition
+        sc500.gameObject:SetActive(true)
+    else
+        sc1000.transform.localPosition =target.transform.localPosition
+        sc1000.gameObject:SetActive(true)
+    end
+end
+
+--fall down collision event,deal with something
+function CheckDuckFailDownEvent()
+    if(target) then    
+        target:GetComponent("DuckHuntLuaCollision"):EventEnter('-', CheckDuckFailDownEvent)  
+        sc1000.gameObject:SetActive(false)
+        sc500.gameObject:SetActive(false)         
+        IsFall =false
+        if(DuckNumCount~=10) then
+            PlayAudio(audioSourceBg,resourcesRef.AudioRef[5])
+        end
+        unity.Object.Destroy(target.gameObject)
+        target= null
+        CatchDuckMovie.gameObject:SetActive(true)
+        isHitDuck=false
+        if(IsNextLevel~=true and DuckNumCount~=10) then
+            ReBorn(2)
+        end
+    end
+end
+
+--Game score manager
+function DuckScoreManager(_name)
+    if(_name.find(_name,"DarkDuck")) then
+            HitDuckScore =HitDuckScore+500
+            hitDuckCategory ="dark"
+        else
+            HitDuckScore =HitDuckScore+1000 
+            hitDuckCategory ="blue"
+    end
+end
+
+--duck init
+function ReBorn(_time)
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(_time))
+            --还原背景颜色
+            mainCam.backgroundColor=unity.Color(0.47,0.67,0.97)
+            ImageEscape.gameObject:SetActive(false)
+            ImageLevel.gameObject:SetActive(false)
+            local bornPos= RandomBornPoint()
+            InstantiateDuck(bornPos)
+            --duck fly background 
+            AudioSourceDFly.gameObject:SetActive(true)
+            RandomFly=true
+            moveNavigation()
+            --Time config
+            _upperNum= 7
+            textTimer.color =unity.Color.white
+            startTimer =true
+            flyAway =false
+            count=0
+            --因为最开始生成的位置偏下，调整最底部的比例值防止触发边界事件
+            bottomPercent=0.3
+            bulletNum =3
+            bulletNumManager(bulletNum)
+            WaitForChangeAnimation(0.9)
+            --激活射击按钮
+            BtnFire:GetComponent("Image").raycastTarget =true
+        end)
+    assert(coroutine.resume(co))
+end
+
+function GetHitNumElement()
+    for i=0,ImageDuckResult.transform.childCount-1 do
+        DuckHitResults[i]=ImageDuckResult.transform:GetChild(i)
+        
+    end
+end
+
+function abc()
+	for j=0,100 do
+		print(j)
+		if j==55 then 
+			print("???")
+		end
+	end
+end
+
+--duck hit manager
+function HitNumManager()       
+    if(DuckNumCount==10) then          
+        IsNextLevel =true 
+        ImageAim.gameObject:SetActive(false)
+        --Game over?
+        if(GameOver()==false) then
+            print("IS WIN AND NEXT LEVEL")
+            HitDuckNum=0
+            level=level+1                                  
+            NextLevelInit(4)    
+        end                      
+    end
+    --not hit duck ui reminder
+    if(flyAway) then
+        DuckHitResults[DuckNumCount-1]:GetComponent("Image").color = unity.Color.gray
+    end
+    --hit duck ui reminder
+    if(isHitDuck) then
+        DuckHitResults[DuckNumCount-1]:GetComponent("Image").color = unity.Color.red
+    end       
+end
+
+function GameOver()
+    local result =false
+    --GAME IS OVER 重置为第一关
+    if(HitDuckNum<6) then
+        result = true       
+        ImageGameOver.gameObject:SetActive(true)
+        PlayAudio(audioSourceBg,resourcesRef.AudioRef[6])
+        local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(6))
+            level= 1  
+            HitDuckNum=0 
+            HitDuckScore=0                    
+            ImageAim.gameObject:SetActive(false)
+            ImageGameOver.gameObject:SetActive(false)
+            ImageEscape.gameObject:SetActive(false)
+            NextLevelInit(2)
+        end)
+        assert(coroutine.resume(co))
+    else 
+        result =false 
+    end    
+    return result
+end
+
+--Next level init 
+function NextLevelInit(_time)
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(_time))
+            ImageEscape.gameObject:SetActive(false)
+            ImageAim.gameObject:SetActive(true)            
+            LevelNumsManager()           
+            IsNextLevel=false
+            DuckNumCount=0
+            ReBorn(2)
+            showLevel(level)        
+            TextLevel:GetComponent("Text").text =level
+            for i=0,9 do
+                DuckHitResults[i]:GetComponent("Image").color = unity.Color.white
+            end    
+        end)
+    assert(coroutine.resume(co))
+end
+
+function LevelNumsManager()
+    if(level%10==0) then
+        print("integer num")
+        local index = level/10
+        if(index<=25) then
+            DuckMoveSpeed =LevelNums[index] 
+        else
+            DuckMoveSpeed =1.5
+        end
+    end
+end
+
+--Game Start~实例化游戏对象
+function InstantiateDuck(_pos)
+    DuckNumCount =DuckNumCount +1
+    local cloneObj= unity.Object.Instantiate(PickDuck())
+    cloneObj.transform:SetParent(Environment.transform)
+    cloneObj.transform.localPosition=_pos
+    target=cloneObj
+end
+
+--Pick random duck
+function PickDuck()
+    ranNum = unity.Random.Range(0,100)
+    if(ranNum<=50) then
+        return BlueDuck
+    else 
+        return DarkDuck
+    end
+end
+
+--Bullet Number manager
+function bulletNumManager(num)   
+    if(num==3) then
+       bOne:SetActive(true)  
+       bTwo:SetActive(true)
+       bThree:SetActive(true)  
+    end
+    if(num==2) then
+       bOne:SetActive(true)  
+       bTwo:SetActive(true)
+       bThree:SetActive(false)                   
+    end
+    if(num==1) then
+       bOne:SetActive(true)  
+       bTwo:SetActive(false)
+       bThree:SetActive(false)               
+    end
+    if(num==0) then
+       bOne:SetActive(false)  
+       bTwo:SetActive(false)
+       bThree:SetActive(false) 
+       BtnFire:GetComponent("Image").raycastTarget =false
+       --子弹打完也没打中 逃逸成功
+       if(isHitDuck==false)  then
+            flyAway =true
+            DuckFlyAway()
+       end      
+    end
+end
+
+function GameDemo.Request(url)
+    local co = coroutine.create(function() 
+    local www = unity.WWW(url)
+    yield_return(www)
+    if not www.error then
+        print(www.text)
+    else
+        print('error:', www.error)
+    end
+    end)
+    assert(coroutine.resume(co))
+end
+
+local m_collisionState
+--Update function
+function Update()
+    if(startTimer) then
+        Timer()
+    end
+    --conver cross world pos to screen pos
+    local _screenPos= positionConvert_ToScreen(ImageAim.transform.position)
+    raycastAimPoint(_screenPos)
+    aimPointController()
+    --textScore.text = HitDuckScore..""
+    ---100% Point Duck 
+    --[[
+    if(unity.Input.GetKeyDown(unity.KeyCode.Space)) then        
+        chooseObj=target
+        FireEvent()
+    end 
+    --]]
+end
+
+--fixupdate calc move 
+function FixedUpdate() 
+    if(RandomFly) then
+        if(target) then
+            randomMover(target)                      
+        end
+    end
+    if(target) then
+        if(IsFall) then            
+            target:GetComponent("Rigidbody"):AddForce(-unity.Vector3.up*99,CS.UnityEngine.ForceMode.Acceleration)
+        end
+    end
+end
+
+--Transform the UI Position(local position)(need use camera renderer mode) to screen position for raycast 注意UI模式在坐标转换中发挥的作用
+function raycastAimPoint(_screenPos)    
+    local ray= mainCam:ScreenPointToRay(unity.Vector3(_screenPos.x,_screenPos.y,0))
+    local casthit= callCS:Raycast(ray,unity.Mathf.Infinity)
+    if(casthit.collider) then 
+            chooseObj =casthit.collider.gameObject
+        else
+            chooseObj =null
+    end
+end
+
+--world Position to screen Position
+function positionConvert_ToScreen(pos)
+   local _screenPos= mainCam:WorldToScreenPoint(pos)
+   return _screenPos
+end
+
+--screen Position to world Position
+function positionConvert_ToWorld(pos)
+    local _screenPos= mainCam:ScreenToViewportPoint(pos)
+    return _screenPos
+end
+
+function aimPointController()
+    if(joystick) then        
+        local localPos= ImageAim.transform.localPosition
+        local x = localPos.x+ joystick.GetTouchPosition.x*JoyXmoveSpeed
+        local y = localPos.y+ joystick.GetTouchPosition.y*JoyYmoveSpeed
+        local movePos =unity.Vector3(x,y,localPos.z)
+        --local position to world position order conver to screenposition 需要本地转换为世界才能正确转换为ScreenPOS
+        local screenPos= positionConvert_ToScreen(Canvas.transform:TransformPoint(movePos))
+        --clamp x in 0-width clamp y in 0-height 对移动范围限定在屏幕范围内
+        if(screenPos.x>0 and screenPos.x<callCS:GetScreenWidthAndHeight().x and screenPos.y>0 and screenPos.y<callCS:GetScreenWidthAndHeight().y) then
+            ImageAim.transform.localPosition = movePos
+        end
+    end
+end
+
+--Fly Away Time
+function Timer()
+    _upperNum=_upperNum- unity.Time.deltaTime
+    textTimer.text= _upperNum..""
+    if(unity.Mathf.Abs(_upperNum)<2) then
+        --Time run out reminder
+        mainCam.backgroundColor= unity.Color(0.96,0.82,0.76)
+        textTimer.color = unity.Color.red
+    end
+    --is over
+    if(unity.Mathf.Abs(_upperNum)<0.1) then
+        startTimer =false
+        textTimer.text= "0.00000"
+        flyAway=true
+    end
+end
+
+--general a duck ins point
+function RandomBornPoint()
+    local leftPointPos= PointLeft.transform.localPosition
+    local rightPointPos= PointRight.transform.localPosition
+    local ranX= unity.Random.Range(leftPointPos.x,rightPointPos.x)
+    return unity.Vector3(ranX,leftPointPos.y,leftPointPos.z)
+end
+
+function showLevel(_level)
+    ImageLevel.gameObject:SetActive(true)
+    ImageLevel.transform:GetChild(0):GetComponent("Text").text= _level..""
+end
+
+function WaitForChangeAnimation(_time)
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(_time))
+        if(target) then
+            target:GetComponent("Animator"):SetTrigger("change")
+            --change bottom percent
+            bottomPercent=0.35
+        end
+     end)
+     assert(coroutine.resume(co))
+end
+
+function WaitForPlayAudio(_time,_audioSource,_clip)
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(_time))
+        _audioSource.clip=_clip
+        _audioSource:Play()
+     end)
+     assert(coroutine.resume(co))
+end
+
+function PlayAudio(_audioSource,_clip)
+    _audioSource.clip=_clip
+    _audioSource:Play()
+end
+
+function GameDemo.DestroyObjectLate(_obj,_time)
+    local co = coroutine.create(function()
+        yield_return(unity.WaitForSeconds(_time))
+        --无论调用静态还是成员或者属性都需要引用全部的类名
+        --Example
+        unity.Object.Destroy(_obj.gameObject)
+        _obj=null
+     end)
+     assert(coroutine.resume(co))
+end
+
+--ai random path controller
+local stopTime
+local moveTime
+local curr_frame
+local total_frame
+local timeCounter1=0
+local timeCounter2=0
+
+function moveNavigation()
+    vel_x = 2.5
+    vel_y = 2.2 
+end
+
+--check border and turn to direction
+function borderCheck()
+     local screenPos = mainCam:WorldToScreenPoint(target.transform.position)
+     -- x > width axis judge
+     if (screenPos.x > callCS:GetScreenWidthAndHeight().x)  then
+          vel_x = -vel_x;
+          --在x轴方向发生改变之后，镜像鸭子来改变飞行动画方向
+          if(judgeDirection(vel_x) =="left") then
+                target:GetComponent("SpriteRenderer").flipX =false
+            else
+                target:GetComponent("SpriteRenderer").flipX =true
+          end
+      end
+      -- x < width axis judge
+      if (screenPos.x < 0)  then
+          vel_x = -vel_x;
+          if(judgeDirection(vel_x) =="left") then
+              target:GetComponent("SpriteRenderer").flipX =false
+          else
+              target:GetComponent("SpriteRenderer").flipX =true
+          end
+      end
+      --limit top position(Screen.Height)
+      if (screenPos.y > callCS:GetScreenWidthAndHeight().y) then
+          vel_y = -vel_y;
+      end
+      --limit bottom position
+      if (screenPos.y < callCS:GetScreenWidthAndHeight().y *bottomPercent) then
+          vel_y = -vel_y;
+      end
+end
+
+--边缘弹射实现
+function randomMover(_obj)         
+    --Duck move 
+    if(_obj) then
+        _obj.transform:Translate(vel_x*DuckMoveSpeed, vel_y*DuckMoveSpeed, 0, unity.Space.self) 
+    end 
+    if(flyAway~=true) then
+        borderCheck()
+    else
+        if(target) then
+            DuckFlyAway()
+        end
+    end
+end
+
+--Duck Fly Away
+function DuckFlyAway()
+    count=count+1
+    if(count>1) then
+        return
+    end
+    HitNumManager()
+    if(DuckNumCount~=10) then
+        ImageEscape.gameObject:SetActive(true)
+    end    
+    startTimer =false
+    BtnFire:GetComponent("Image").raycastTarget =false     
+    DogLaughMovie.gameObject:SetActive(true)
+    --在关卡结束的时候会产生音频冲突，不播放逃逸的音效
+    if(DuckNumCount~=10) then
+        PlayAudio(audioSourceBg,resourcesRef.AudioRef[3])
+    end
+    AudioSourceDFly.gameObject:SetActive(false)
+    BottomCollider.gameObject:SetActive(false)
+        if(target) then
+            --逃离飞出边界，所以需要进行延时处理
+            local co = coroutine.create(function()
+                yield_return(unity.WaitForSeconds(2))       
+                RandomFly= false                
+                unity.Object.Destroy(target.gameObject)
+                target=null
+                if(IsNextLevel~=true and DuckNumCount~=10) then
+                    ReBorn(2)
+                end
+            end)
+            assert(coroutine.resume(co))          
+        end
+end
+
+--判断鸭子的横向飞行方向 正数表示向右横向飞行 负数则相反
+function judgeDirection(axis)
+    local direction
+    if(axis<0) then
+        direction ="left"    
+    else 
+        direction ="right"
+    end
+    return direction
+end
+
+
+
+

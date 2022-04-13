@@ -1,0 +1,30 @@
+version: 2
+importPivots: 1
+tpsheetFileNames:
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子-Die/BlueDarkDie.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子飞-Begin/BlueDarkStart.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子飞-Normal/BlueDarkNormal.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子-Die/DarkDuckDie.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子飞-Begin/DarkDuckFlyBegin.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子飞-Normal/DarkDuckFlyNormal.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/ui/DuckUIPack.tpsheet
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/ui/DuckUIPackOther.tpsheet
+textureFileNames:
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子-Die/BlueDarkDie.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子飞-Begin/BlueDarkStart.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/蓝鸭子飞-Normal/BlueDarkNormal.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子-Die/DarkDuckDie.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子飞-Begin/DarkDuckFlyBegin.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/texture game/duckAnimation/黑鸭子飞-Normal/DarkDuckFlyNormal.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/ui/DuckUIPack.png
+- Assets/DuckHunt/Duck Hunt Case/Game Resources/ui/DuckUIPackOther.png
+normalmapFileNames:
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+- 
+enableDebugOutput: 0
